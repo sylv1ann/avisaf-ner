@@ -72,28 +72,21 @@ class ASRSReportClassificationPredictor:
         logger.info(self._preprocessor.get_data_distribution(test_target)[1])
 
         logger.info(f'Test data shape: {test_data.shape}')
-        predictions = self.predict_proba(test_data)
+        predictions = self.predict(test_data, predict_proba=True)
         return predictions, test_target
 
-    def predict(self, test_data, model_to_use=None):
+    def predict(self, test_data, model_to_use=None, predict_proba: bool = True):
         model = self._model if model_to_use is None else model_to_use
 
         if model is None:
             raise ValueError('A model needs to be trained or loaded first to perform predictions.')
 
-        logger.info(f'Predictions made using model: {model}')
-        predictions = model.predict(test_data)
-
-        return predictions
-
-    def predict_proba(self, test_data, model_to_use=None):
-        model = self._model if model_to_use is None else model_to_use
-
-        if model is None:
-            raise ValueError('A model needs to be trained or loaded first to perform predictions.')
-
-        logger.info(f'Probability predictions made using model: {model}')
-        predictions = model.predict_proba(test_data)
+        if predict_proba:
+            logger.info(f'Probability predictions made using model: {model}')
+            predictions = model.predict_proba(test_data)
+        else:
+            logger.info(f'Predictions made using model: {model}')
+            predictions = model.predict(test_data)
 
         return predictions
 
@@ -201,7 +194,7 @@ class ASRSReportClassificationTrainer:
         # TODO: Initialize an empty model for each field classifier
         def set_classification_algorithm(classification_algorithm: str):
             available_classifiers = {
-                'mlp': MLPClassifier(
+                'mlp': (MLPClassifier(
                     hidden_layer_sizes=(128, 64),
                     alpha=0.001,
                     batch_size=256,
@@ -210,23 +203,51 @@ class ASRSReportClassificationTrainer:
                     random_state=6240,
                     verbose=True,
                     early_stopping=True
-                ),
-                'svm': SVC(probability=True),
-                'tree': DecisionTreeClassifier(criterion='entropy', max_features=10000),
-                'forest': RandomForestClassifier(n_estimators=150, criterion='entropy', min_samples_split=15),
-                'knn': KNeighborsClassifier(n_neighbors=15),
-                'gauss': GaussianNB(),
-                'mnb': MultinomialNB(),
-                'bernoulli': BernoulliNB()
+                ), {
+                    "hidden_layer_sizes": [(256, 32), (128, 16)],
+                    "alpha": [0.005, 0.01, 0.0005],
+                    "learning_rate_init": [0.005, 0.001],
+                }),
+                'svm': (SVC(probability=True), {}),
+                'tree': (DecisionTreeClassifier(criterion='entropy', max_features=10000),
+                         {
+                             "criterion": ["gini", "entropy"],
+                             "max_depth": [None, 8, 16],
+                             "min_samples_split": [4, 8, 16, 32],
+                             "min_samples_leaf": [2, 4, 8, 16],
+                             "max_features": ["auto", 10000]
+                         }),
+                'forest': (RandomForestClassifier(n_estimators=150, criterion='entropy', min_samples_split=15),
+                           {
+                               "criterion": ["gini", "entropy"],
+                               "max_depth": [None, 8, 16],
+                               "min_samples_split": [4, 8, 16, 32],
+                               "min_samples_leaf": [2, 8, 16],
+                               "max_features": ["auto", 10000]
+                        }),
+                'knn': (KNeighborsClassifier(n_neighbors=15),
+                        {
+                            "n_neighbors": [10, 15, 20],
+                            "weights": ["uniform", "distance"],
+                            "algorithm": ["auto", "ball_tree"],
+                            "p": [1, 2],
+                        }),
+                'gauss': (GaussianNB(), {}),
+                'mnb': (MultinomialNB(), {}),
+                'bernoulli': (BernoulliNB(), {})
             }
 
             # Setting a default classifier value
-            _classifier = available_classifiers['knn']
+            _classifier, grid = available_classifiers['knn']
 
             if available_classifiers.get(classification_algorithm) is not None:
-                _classifier = available_classifiers[classification_algorithm]
+                _classifier, grid = available_classifiers[classification_algorithm]
 
-            return _classifier
+            from sklearn.model_selection import StratifiedKFold, GridSearchCV
+
+            gs = GridSearchCV(_classifier, grid, cv=StratifiedKFold(), verbose=3)
+
+            return gs
 
         if parameters is None:
             parameters = dict()
@@ -283,6 +304,14 @@ class ASRSReportClassificationTrainer:
             normalize=self._normalize
         )
 
+        """dev_data, dev_target = self._preprocessor.vectorize_texts(
+            ['../ASRS/ASRS_dev.csv'],
+            label_to_train,
+            train=False,
+            label_values_filter=label_filter,
+            normalize=False
+        )"""
+
         # encoding is available only after texts vectorization
         self._encoding.update(self._preprocessor.get_encoding())
 
@@ -291,10 +320,32 @@ class ASRSReportClassificationTrainer:
         logger.debug(f'Train data shape: {train_data.shape}')
         logger.info(self._model)
 
-        self._model = self._model.fit(train_data, train_target)
+        self._model.fit(train_data, train_target)
+        self._model_params = self._model.best_estimator_.get_params()
 
-        logging.info(f"MODEL: {self._model}")
-        self.save_model(self._model)
+        logging.debug(f"Best parameters set found: {self._model.best_params_}")
+        means = self._model.cv_results_['mean_test_score']
+        stds = self._model.cv_results_['std_test_score']
+
+        for mean, std, params in zip(means, stds, self._model.cv_results_['params']):
+            logging.debug("%0.3f (+/-%0.03f) for %r" % (mean, std * 2, params))
+
+        logging.info(f"BEST MODEL: {self._model.best_estimator_}")
+        self._params = {
+            "algorithm": self._algorithm,
+            "encoding": self._encoding,
+            "model_params": self._model_params,
+            "trained_label": self._trained_filtered_labels,
+            "trained_texts": self._trained_texts,
+            "vectorizer_params": self._preprocessor.vectorizer.get_params()
+        }
+        self.save_model(self._model.best_estimator_)
+        self._model = self._model.best_estimator_
+
+        print("====== best score below")
+        print(self._model.best_score_)
+        print("===== best estimator below")
+        print(self._model.best_estimator_)
 
         train_data_evaluator = ASRSReportClassificationPredictor(
             model=self._model,
@@ -302,8 +353,18 @@ class ASRSReportClassificationTrainer:
             vectorizer=self._preprocessor.vectorizer,
             normalized=self._normalize,
         )
-        predictions = train_data_evaluator.predict_proba(train_data)
+        predictions = train_data_evaluator.predict(train_data, predict_proba=True)
         ASRSReportClassificationEvaluator.evaluate([predictions], train_target)
+        """logging.debug("==============================================================")
+        logging.debug("==============================================================")
+        logging.debug("==============================================================")
+        dev_data_evaluator = ASRSReportClassificationPredictor(
+            model=self._model,
+            parameters=self._params,
+            vectorizer=self._preprocessor.vectorizer,
+        )
+        dev_predictions = dev_data_evaluator.predict(dev_data, predict_proba=True)
+        ASRSReportClassificationEvaluator.evaluate([dev_predictions], dev_target)"""
 
     def save_model(self, model_to_save):
         model_dir_name = "asrs_classifier-{}-{}-{}".format(
@@ -326,16 +387,7 @@ class ASRSReportClassificationTrainer:
 
         with open(Path("classifiers", model_dir_name, 'parameters.json'), 'w', encoding="utf-8") as params_file:
             logger.info(f'Saving parameters [encoding, model parameters, train_texts_paths, trained_label, label_filter]')
-            parameters = {
-                "algorithm": self._algorithm,
-                "encoding": self._encoding,
-                "model_params": self._model_params,
-                "trained_label": self._trained_filtered_labels,
-                "trained_texts": self._trained_texts,
-                "vectorizer_params": self._preprocessor.vectorizer.get_params()
-            }
-            json.dump(parameters, params_file, indent=4)
-            self._params = parameters
+            json.dump(self._params, params_file, indent=4)
 
 
 def launch_classification(models_dir_paths: list, texts_paths: list, label: str, label_filter: list, algorithm: str, normalize: bool, mode: str, plot: bool):
