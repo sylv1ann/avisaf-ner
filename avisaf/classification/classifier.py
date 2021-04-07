@@ -156,16 +156,16 @@ class ASRSReportClassificationEvaluator:
         if ensemble:
             print(ensemble)
         print('Model Based Accuracy: {:.2f}'.format(metrics.accuracy_score(test_target, predictions) * 100))
-        print('Model Based Precision: {:.2f}'.format(metrics.precision_score(test_target, predictions) * 100))
-        print('Model Based Recall: {:.2f}'.format(metrics.recall_score(test_target, predictions) * 100))
+        print('Model Based Precision: {:.2f}'.format(metrics.precision_score(test_target, predictions, average=avg) * 100))
+        print('Model Based Recall: {:.2f}'.format(metrics.recall_score(test_target, predictions, average=avg) * 100))
         print('Model Based F1-score: {:.2f}'.format(metrics.f1_score(test_target, predictions, average=avg) * 100))
         print('==============================================')
         for unique_prediction in range(unique_predictions_count):
             predictions = np.full(test_target.shape, unique_prediction)
             print(f'Accuracy predicting always {unique_prediction}: {metrics.accuracy_score(test_target, predictions) * 100}')
             print(f'F1-score: {metrics.f1_score(test_target, predictions, average=avg) * 100}')
-            print(f'Model Based Precision: {metrics.precision_score(test_target, predictions, zero_division=1) * 100}')
-            print(f'Model Based Recall: {metrics.recall_score(test_target, predictions) * 100}')
+            print(f'Model Based Precision: {metrics.precision_score(test_target, predictions, zero_division=1, average=avg) * 100}')
+            print(f'Model Based Recall: {metrics.recall_score(test_target, predictions, average=avg) * 100}')
             print('==============================================')
 
     @staticmethod
@@ -196,10 +196,10 @@ class ASRSReportClassificationTrainer:
             available_classifiers = {
                 'mlp': (MLPClassifier(
                     hidden_layer_sizes=(128, 64),
-                    alpha=0.001,
-                    batch_size=256,
+                    alpha=0.005,
+                    batch_size=128,
                     learning_rate='adaptive',
-                    learning_rate_init=0.0007,
+                    learning_rate_init=0.005,
                     random_state=6240,
                     verbose=True,
                     early_stopping=True
@@ -208,7 +208,11 @@ class ASRSReportClassificationTrainer:
                     "alpha": [0.005, 0.01, 0.0005],
                     "learning_rate_init": [0.005, 0.001],
                 }),
-                'svm': (SVC(probability=True), {}),
+                'svm': (SVC(probability=True),
+                        {
+                            "C": [1.0, 0.5, 1.5],
+                            "kernel": ["poly", "rbf"],
+                        }),
                 'tree': (DecisionTreeClassifier(criterion='entropy', max_features=10000),
                          {
                              "criterion": ["gini", "entropy"],
