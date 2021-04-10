@@ -13,6 +13,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import sklearn.metrics as metrics
 from pathlib import Path
+from sklearn.model_selection import cross_validate, cross_val_score, learning_curve
 from sklearn.neural_network import MLPClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
@@ -145,28 +146,30 @@ class ASRSReportClassificationEvaluator:
         unique_predictions_count = np.unique(test_target).shape[0]
         avg = 'binary' if unique_predictions_count == 2 else 'micro'
 
-        # sample_weights = np.ndarray((predictions.shape[0]))
-
-        # for idx, pred in enumerate(predictions):
-        #    sample_weights[idx] = 1 if pred == 1 else 2
-
         print('==============================================')
         print('Confusion matrix: number [i,j] indicates the number of observations of class i which were predicted to be in class j')
         print(metrics.confusion_matrix(test_target, predictions))
         if ensemble:
             print(ensemble)
         print('Model Based Accuracy: {:.2f}'.format(metrics.accuracy_score(test_target, predictions) * 100))
-        print('Model Based Precision: {:.2f}'.format(metrics.precision_score(test_target, predictions, average=avg) * 100))
-        print('Model Based Recall: {:.2f}'.format(metrics.recall_score(test_target, predictions, average=avg) * 100))
-        print('Model Based F1-score: {:.2f}'.format(metrics.f1_score(test_target, predictions, average=avg) * 100))
+        print('Model Based Micro Precision: {:.2f}'.format(metrics.precision_score(test_target, predictions, average=avg) * 100))
+        print('Model Based Macro Precision: {:.2f}'.format(metrics.precision_score(test_target, predictions, average='macro') * 100))
+        print('Model Based Micro Recall: {:.2f}'.format(metrics.recall_score(test_target, predictions, average=avg) * 100))
+        print('Model Based Macro Recall: {:.2f}'.format(metrics.recall_score(test_target, predictions, average='macro') * 100))
+        print('Model Based Micro F1-score: {:.2f}'.format(metrics.f1_score(test_target, predictions, average=avg) * 100))
+        print('Model Based Macro F1-score: {:.2f}'.format(metrics.f1_score(test_target, predictions, average='macro') * 100))
         print('==============================================')
-        for unique_prediction in range(unique_predictions_count):
-            predictions = np.full(test_target.shape, unique_prediction)
-            print(f'Accuracy predicting always {unique_prediction}: {metrics.accuracy_score(test_target, predictions) * 100}')
-            print(f'F1-score: {metrics.f1_score(test_target, predictions, average=avg) * 100}')
-            print(f'Model Based Precision: {metrics.precision_score(test_target, predictions, zero_division=1, average=avg) * 100}')
-            print(f'Model Based Recall: {metrics.recall_score(test_target, predictions, average=avg) * 100}')
-            print('==============================================')
+        if unique_predictions_count < 5:
+            for unique_prediction in range(unique_predictions_count):
+                predictions = np.full(test_target.shape, unique_prediction)
+                print(f'Accuracy predicting always {unique_prediction}: {metrics.accuracy_score(test_target, predictions) * 100}')
+                print(f'Micro F1-score: {metrics.f1_score(test_target, predictions, average=avg) * 100}')
+                print(f'Macro F1-score: {metrics.f1_score(test_target, predictions, average="macro") * 100}')
+                print(f'Model Based Micro Precision: {metrics.precision_score(test_target, predictions, zero_division=1, average=avg) * 100}')
+                print(f'Model Based Macro Precision: {metrics.precision_score(test_target, predictions, zero_division=1, average="macro") * 100}')
+                print(f'Model Based Micro Recall: {metrics.recall_score(test_target, predictions, average=avg) * 100}')
+                print(f'Model Based Micro Recall: {metrics.recall_score(test_target, predictions, average="macro") * 100}')
+                print('==============================================')
 
     @staticmethod
     def plot(probability_predictions, test_target):
@@ -185,6 +188,63 @@ class ASRSReportClassificationEvaluator:
         plt.ylabel('True Positive Rate')
         plt.xlabel('False Positive Rate')
         plt.show()
+
+    @staticmethod
+    def plot_learning_curve(estimator, title, X, y, axes=None, ylim=None, cv=None,
+                            n_jobs=None, train_sizes=np.linspace(.1, 1.0, 5)):
+        if axes is None:
+            _, axes = plt.subplots(1, 3, figsize=(20, 5))
+
+        axes[0].set_title(title)
+        if ylim is not None:
+            axes[0].set_ylim(*ylim)
+        axes[0].set_xlabel("Training examples")
+        axes[0].set_ylabel("Score")
+
+        train_sizes, train_scores, test_scores, fit_times, _ = \
+            learning_curve(estimator, X, y, cv=cv, n_jobs=n_jobs,
+                           train_sizes=train_sizes,
+                           return_times=True)
+        train_scores_mean = np.mean(train_scores, axis=1)
+        train_scores_std = np.std(train_scores, axis=1)
+        test_scores_mean = np.mean(test_scores, axis=1)
+        test_scores_std = np.std(test_scores, axis=1)
+        fit_times_mean = np.mean(fit_times, axis=1)
+        fit_times_std = np.std(fit_times, axis=1)
+
+        # Plot learning curve
+        axes[0].grid()
+        axes[0].fill_between(train_sizes, train_scores_mean - train_scores_std,
+                             train_scores_mean + train_scores_std, alpha=0.1,
+                             color="r")
+        axes[0].fill_between(train_sizes, test_scores_mean - test_scores_std,
+                             test_scores_mean + test_scores_std, alpha=0.1,
+                             color="g")
+        axes[0].plot(train_sizes, train_scores_mean, 'o-', color="r",
+                     label="Training score")
+        axes[0].plot(train_sizes, test_scores_mean, 'o-', color="g",
+                     label="Cross-validation score")
+        axes[0].legend(loc="best")
+
+        # Plot n_samples vs fit_times
+        axes[1].grid()
+        axes[1].plot(train_sizes, fit_times_mean, 'o-')
+        axes[1].fill_between(train_sizes, fit_times_mean - fit_times_std,
+                             fit_times_mean + fit_times_std, alpha=0.1)
+        axes[1].set_xlabel("Training examples")
+        axes[1].set_ylabel("fit_times")
+        axes[1].set_title("Scalability of the model")
+
+        # Plot fit_time vs score
+        axes[2].grid()
+        axes[2].plot(fit_times_mean, test_scores_mean, 'o-')
+        axes[2].fill_between(fit_times_mean, test_scores_mean - test_scores_std,
+                             test_scores_mean + test_scores_std, alpha=0.1)
+        axes[2].set_xlabel("fit_times")
+        axes[2].set_ylabel("Score")
+        axes[2].set_title("Performance of the model")
+
+        return plt
 
 
 class ASRSReportClassificationTrainer:
@@ -357,6 +417,34 @@ class ASRSReportClassificationTrainer:
             vectorizer=self._preprocessor.vectorizer,
             normalized=self._normalize,
         )
+
+        cross_val = False
+        if cross_val:
+            print(f'CV scores: {cross_val_score(self._model, train_data, train_target, cv=5, n_jobs=2, verbose=3)}')
+            scores = cross_validate(
+                self._model,
+                train_data,
+                train_target,
+                scoring=[
+                    'precision_micro',
+                    'recall_micro',
+                    'precision_macro',
+                    'recall_macro'
+                ],
+                verbose=5
+            )
+
+            for key in scores.keys():
+                print(f'Key: "{ key }"\nValue: "{ scores[key] }"')
+
+            tr_size, tr_scores, valid_scores = learning_curve(self._model, train_data, train_target, cv=5, verbose=3)
+            print(tr_size)
+            print(tr_scores)
+            print(valid_scores)
+            p = ASRSReportClassificationEvaluator.plot_learning_curve(self._model, "TITLE", train_data, train_target, cv=5)
+            p.savefig("learning_curve.png")
+
+        # predictions = train_data_evaluator.predict_proba(train_data)
         predictions = train_data_evaluator.predict(train_data, predict_proba=True)
         ASRSReportClassificationEvaluator.evaluate([predictions], train_target)
         """logging.debug("==============================================================")

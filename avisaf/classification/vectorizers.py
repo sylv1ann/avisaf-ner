@@ -39,10 +39,10 @@ class TfIdfAsrsReportVectorizer(AsrsReportVectorizer):
         self.transformer_name = 'tfidf'
         self._transformer = TfidfVectorizer(
             stop_words='english',
-            lowercase=False,
+            lowercase=True,
             ngram_range=(1, 3),
             analyzer='word',
-            max_features=100_000,
+            min_df=0.02,
             max_df=0.5
         )
 

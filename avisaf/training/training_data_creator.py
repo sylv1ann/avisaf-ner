@@ -289,10 +289,16 @@ class ASRSReportDataPreprocessor:
 
                 if target_label_filter is not None:
                     # apply label filtration and truncation
-                    matched_filter = list(filter(lambda x: str(label).startswith(x.strip()), target_label_filter))
+                    matched_filter = list(filter(lambda x: str(label).startswith(x.strip()), target_label_filter)) + \
+                                     list(filter(lambda x: str(label).endswith(x.strip()), target_label_filter))
+
                     if len(matched_filter) != 1:
-                        # The label is not unambiguous
-                        continue
+
+                        if label in matched_filter:
+                            matched_label = label
+                        else:
+                            # The label is not unambiguous
+                            continue
                     else:
                         matched_label = matched_filter[0]
                 new_texts.append(text)
